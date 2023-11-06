@@ -1,5 +1,6 @@
 let LocalStrategy = require('passport-local').Strategy;
-let bCrypt = require('bcrypt-nodejs');
+const bcrypt = require('bcrypt');
+const saltRounds = 10;
 
 module.exports = function(passport, Bookshelf) {
   // User model
@@ -40,8 +41,8 @@ module.exports = function(passport, Bookshelf) {
 
         try {
           new User({ email: userEmail })
-            .fetch()
-            .then(function(user) {
+            .fetch({require: false})
+            .then(async function(user) {
               if (!user) {
                 console.error(
                   'No user found with that email: ' + userEmail + '.',
@@ -56,7 +57,8 @@ module.exports = function(passport, Bookshelf) {
                   ),
                 );
               }
-              if (!isValidPassword(password, user.get('password'))) {
+              const validpw = await isValidPassword(password, user.get('password'));
+              if (!validpw) {
                 console.error('Oops! Wrong password.');
                 return done(
                   null,
@@ -106,13 +108,13 @@ module.exports = function(passport, Bookshelf) {
         passwordField: 'password',
         passReqToCallback: true, // allows us to pass back the entire request to the callback
       },
-      function(req, userEmail, password, done) {
+      async function(req, userEmail, password, done) {
         try {
           // find a user whose email is the same as the forms email
           // check if user already exists in DB
           new User({ email: userEmail })
-            .fetch()
-            .then(function(user) {
+            .fetch({require: false})
+            .then(async function(user) {
               if (user) {
                 console.info('User already exists:' + user.toJSON());
                 return done(
@@ -144,9 +146,10 @@ module.exports = function(passport, Bookshelf) {
               } else {
                 // if there is no user with that email
                 // create the user
+                const hashedPassword = await createHash(req.body.password); // await the result of createHash
                 User.forge({
                   email: req.body.email,
-                  password: createHash(req.body.password),
+                  password: hashedPassword,
                   vorname: req.body.vorname,
                   name: req.body.name,
                   gender: req.body.gender,
@@ -164,7 +167,7 @@ module.exports = function(passport, Bookshelf) {
                   })
                   .catch(function(err) {
                     console.error(
-                      'Error during saving new user. Error message:' + err,
+                      'Error during saving new user. Error message:' + hashedPassword,
                     );
                     return done(
                       null,
@@ -182,7 +185,7 @@ module.exports = function(passport, Bookshelf) {
               return done(
                 null,
                 false,
-                req.flash('authMsg', 'Error during signup.'),
+                req.flash('authMsg', '2Error during signup.'),
               );
             });
         } catch (ex) {
@@ -205,13 +208,14 @@ module.exports = function(passport, Bookshelf) {
         passwordField: 'password',
         passReqToCallback: true, // allows us to pass back the entire request to the callback
       },
-      function(req, userID, password, done) {
+      async function(req, userID, password, done) {
         try {
           // find a user whose email is the same as the forms email
           // check if user already exists in DB
+         
           new User({ id: userID })
-            .fetch()
-            .then(function(user) {
+            .fetch({require: false})
+            .then(async function(user) {
               if (!user) {
                 console.error('No user found with ID: ' + userID + '.');
                 return done(
@@ -236,9 +240,10 @@ module.exports = function(passport, Bookshelf) {
                 );
               } else {
                 // if user is found
+                const hashedPassword = await createHash(req.body.password); // await the result of createHash
                 user
                   .save({
-                    password: createHash(req.body.password),
+                    password: hashedPassword,
                     resetPasswordToken: null,
                     resetPasswordExpires: null,
                   })
@@ -294,13 +299,13 @@ module.exports = function(passport, Bookshelf) {
         passwordField: 'newPwd',
         passReqToCallback: true, // allows us to pass back the entire request to the callback
       },
-      function(req, userID, newPwd, done) {
+      async function(req, userID, newPwd, done) {
         console.log('Change password method called for user: ' + userID);
         try {
           // find a user whose email is the same as the forms email
           new User({ id: userID })
-            .fetch()
-            .then(function(user) {
+            .fetch({ require: false })
+            .then(async function(user) {
               if (!user) {
                 console.error('No user found with ID: ' + userID + '.');
                 return done(
@@ -311,9 +316,9 @@ module.exports = function(passport, Bookshelf) {
                     'No user found with ID: ' + userID + '.',
                   ),
                 );
-              } else if (
-                !isValidPassword(req.body.oldPwd, user.get('password'))
-              ) {
+              }
+              const validpw = await isValidPassword(req.body.oldPwd, user.get('password'));
+              if (!validpw) {
                 console.error(
                   'Your given password does not match your old password.',
                 );
@@ -327,9 +332,11 @@ module.exports = function(passport, Bookshelf) {
                 );
               } else {
                 // if user is found and gives correct password
+                console.log('Test')
+                const hashedPassword = await createHash(newPwd); // await the result of createHash
                 user
                   .save({
-                    password: createHash(newPwd),
+                    password: hashedPassword,
                   })
                   .then(function(user) {
                     console.log('New password saved.');
@@ -371,16 +378,20 @@ module.exports = function(passport, Bookshelf) {
 
   //Helper Functions
 
-  let isValidPassword = function(pwd, pwdHash) {
+  const isValidPassword = async function (pwd, pwdHash) {
     try {
-      return bCrypt.compareSync(pwd, pwdHash);
+      return await bcrypt.compare(pwd, pwdHash);
     } catch (err) {
       console.error(err + ' - the password seems to have the wrong format');
       return false;
     }
   };
-  // Generates hash using bCrypt
-  let createHash = function(password) {
-    return bCrypt.hashSync(password, bCrypt.genSaltSync(10), null);
+  
+  // Generates hash using bcrypt
+  const createHash = async function (password) {
+    const saltRounds = 10;
+    const salt = await bcrypt.genSalt(saltRounds);
+    const hash = await bcrypt.hash(password, salt);
+    return hash;
   };
 };
